@@ -1,6 +1,3 @@
-// for pthread_setaffinity_np
-#define _GNU_SOURCE
-
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -52,7 +49,7 @@ struct eggbot_config
   bool dry_run; // don't move the servo
 };
 
-double move_accel(double length, double dt, double start_speed)
+static double move_accel(double length, double dt, double start_speed)
 {
   // d(t) = 1/2 a t^2 + v0 t
   // d(dt) = length = 1/2 a dt^2 + v0 dt
@@ -60,38 +57,38 @@ double move_accel(double length, double dt, double start_speed)
   return 2 * (length / (dt * dt) - start_speed / dt);
 }
 
-float end_speed(float length, float dt, float start_speed)
+static float end_speed(float length, float dt, float start_speed)
 {
   return move_accel(length, dt, start_speed) * dt + start_speed;
 }
 
-float blend(float t, float low, float high)
+static float blend(float t, float low, float high)
 {
   return low + (high - low) * t;
 }
 
-float servo_factor(struct servo_config servo_config, float f)
+static float servo_factor(struct servo_config servo_config, float f)
 {
   return blend(
     blend(
-      1.0 - f,
+      1.0f - f,
       servo_config.low, servo_config.high
     ),
     servo_config.pwm_low, servo_config.pwm_high
   );
 }
 
-pthread_t worker_id;
-bool worker_abort = false;
-bool worker_aborted = false;
+static pthread_t worker_id;
+static bool worker_abort = false;
+static bool worker_aborted = false;
 
 #ifdef LOG_SERVO_TIMINGS
-int servolog;
+static int servolog;
 #endif
 
-uint64_t global_cycle_counter = 0;
+static uint64_t global_cycle_counter = 0;
 
-void step(struct eggbot_config *config, coordinate from, coordinate to, float dt)
+static void step(struct eggbot_config *config, coordinate from, coordinate to, float dt)
 {
   if (dt < 0)
   {
@@ -209,16 +206,7 @@ void step(struct eggbot_config *config, coordinate from, coordinate to, float dt
   global_cycle_counter += cycles;
 }
 
-uint32_t next_pow2(uint32_t i) {
-  uint32_t r = 1;
-  while (r < i)
-  {
-    r <<= 1;
-  }
-  return r;
-}
-
-void clear_all(int signum)
+static void clear_all(int signum)
 {
   printf("clear all...\n");
   if (worker_id != 0 && worker_id != pthread_self())
@@ -238,7 +226,7 @@ void clear_all(int signum)
   raise(signum);
 }
 
-void setup_guards()
+static void setup_guards()
 {
   signal(SIGINT, &clear_all);
   signal(SIGTERM, &clear_all);
@@ -246,7 +234,7 @@ void setup_guards()
   signal(SIGABRT, &clear_all);
 }
 
-void initialize_gpios(struct eggbot_config *config)
+static void initialize_gpios(struct eggbot_config *config)
 {
   initialize_gpio_for_output(config->servo_config.out);
   initialize_gpio_for_output(config->egg_config.out1);
@@ -265,10 +253,10 @@ struct worker
   struct task_ring_buffer *queue;
 };
 
-void coord_bound(coordinate *coordp)
+static void coord_bound(coordinate *coordp)
 {
   float penf = unitf(coordp->pen);
-  float low = -5, high = 5;
+  int low = -5, high = 5;
   if (penf < low)
   {
     fprintf(stderr, "warn: attempt to set pen position out of bounds: %f\n", penf);
@@ -281,7 +269,7 @@ void coord_bound(coordinate *coordp)
   }
 }
 
-void queue_task(struct task_ring_buffer *buffer, coordinate from, coordinate to, float dt)
+static void queue_task(struct task_ring_buffer *buffer, coordinate from, coordinate to, float dt)
 {
   coord_bound(&from);
   coord_bound(&to);
@@ -289,13 +277,13 @@ void queue_task(struct task_ring_buffer *buffer, coordinate from, coordinate to,
   ringbuffer_queue(buffer, (struct task) { .quit = false, .from = from, .to = to, .dt = dt });
 }
 
-void queue_quit(struct task_ring_buffer *buffer)
+static void queue_quit(struct task_ring_buffer *buffer)
 {
   ringbuffer_queue(buffer, (struct task) { .quit = true });
 }
 
 // set speed in `nextp` to match the acceleration computed by `step()` so that next continues smoothly.
-void set_finishing_speed(coordinate from, coordinate *nextp, float dt)
+static void set_finishing_speed(coordinate from, coordinate *nextp, float dt)
 {
   float distance_egg = unit_diff_f(from.egg, nextp->egg);
   nextp->egg_speed = end_speed(distance_egg, dt, from.egg_speed);
@@ -304,7 +292,7 @@ void set_finishing_speed(coordinate from, coordinate *nextp, float dt)
   nextp->pen_speed = end_speed(distance_pen, dt, from.pen_speed);
 }
 
-void stepper_advance(struct worker *worker, coordinate *coordp, float dt, float egg, float pen, float servo)
+static void stepper_advance(struct worker *worker, coordinate *coordp, float dt, float egg, float pen, float servo)
 {
   coordinate next = coord_advance(*coordp, egg, pen, servo);
 
@@ -313,7 +301,7 @@ void stepper_advance(struct worker *worker, coordinate *coordp, float dt, float 
   *coordp = next;
 }
 
-void *worker_task(void *data)
+static void *worker_task(void *data)
 {
   struct worker *worker = (struct worker*) data;
   cpu_set_t cpuset;
@@ -345,7 +333,7 @@ void *worker_task(void *data)
       while (!ringbuffer_peek(worker->queue) && !worker_abort)
       {
         coordinate next = last;
-        step(&worker->config, last, next, 0.1);
+        step(&worker->config, last, next, 0.1f);
       }
     }
   }
@@ -353,7 +341,7 @@ void *worker_task(void *data)
   return NULL;
 }
 
-pthread_t start_worker(struct worker *worker)
+static pthread_t start_worker(struct worker *worker)
 {
   pthread_t worker_thread;
   int res = pthread_create(&worker_thread, NULL, worker_task, worker);
@@ -367,7 +355,7 @@ pthread_t start_worker(struct worker *worker)
 }
 
 // set speed at `*fromp` so as to move towards `to` with instant acceleration
-void set_instant_speed(coordinate *fromp, coordinate to, float dt)
+static void set_instant_speed(coordinate *fromp, coordinate to, float dt)
 {
   float eggmove = unit_diff_f(fromp->egg, to.egg);
   float penmove = unit_diff_f(fromp->pen, to.pen);
@@ -378,13 +366,13 @@ void set_instant_speed(coordinate *fromp, coordinate to, float dt)
 
 static void process_eggcode_file(struct worker *worker, coordinate *pos, const char *filename)
 {
-  const double speedscale = 1.0;
+  const float speedscale = 1.0;
   FILE *cmd_file = fopen(filename, "r");
   char *line_ptr = NULL;
   size_t line_len0 = 0;
   while (true)
   {
-    int res = getline(&line_ptr, &line_len0, cmd_file);
+    ssize_t res = getline(&line_ptr, &line_len0, cmd_file);
     if (res == -1)
     {
       fclose(cmd_file);
@@ -405,7 +393,7 @@ static void process_eggcode_file(struct worker *worker, coordinate *pos, const c
       }
       pos->egg_speed = 0;
       pos->pen_speed = 0;
-      stepper_advance(worker, pos, dt_ms * speedscale / 1000.0, 0.0, 0.0, penstate);
+      stepper_advance(worker, pos, dt_ms * speedscale / 1000.0f, 0.0, 0.0, penstate);
     }
     else if (strncmp(line_ptr, "SM,", min(3, line_len)) == 0)
     {
@@ -418,9 +406,9 @@ static void process_eggcode_file(struct worker *worker, coordinate *pos, const c
         fprintf(stderr, "invalid SM command %s\n", line_ptr);
         abort();
       }
-      float eggmove = degg / 64.0;
-      float penmove = dpen / 90.0;
-      float dt = dt_ms * speedscale / 1000.0;
+      float eggmove = degg / 64.0f;
+      float penmove = dpen / 90.0f;
+      float dt = dt_ms * speedscale / 1000.0f;
       coordinate next = coord_advance(*pos, eggmove, penmove, pos->servo);
       set_instant_speed(pos, next, dt);
       stepper_advance(worker, pos, dt, eggmove, penmove, pos->servo);

@@ -1,6 +1,6 @@
 SOURCES=$(wildcard *.c)
 OBJECTS=$(addprefix .obj/,$(SOURCES:.c=.o))
-CFLAGS=-Wall -Werror -pedantic -std=c99 -g -O2
+CFLAGS=-D_GNU_SOURCE -Wall -Werror -pedantic -std=c99 -g -O2
 LDFLAGS=-lm -lpthread
 
 .obj:

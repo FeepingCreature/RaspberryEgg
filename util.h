@@ -1,9 +1,7 @@
 #ifndef RASPBERRYEGG_UTIL_H
 #define RASPBERRYEGG_UTIL_H
 
-// for clock_gettime
-#define _GNU_SOURCE
-
+#include <stdint.h>
 #include <stdio.h>
 #include <time.h>
 
@@ -32,7 +30,7 @@ float unitf(unit unit);
 
 float unit_diff_f(unit from, unit to);
 
-static double secs()
+static inline double secs()
 {
   struct timespec time;
 
@@ -43,6 +41,15 @@ static double secs()
 static inline int min(int a, int b)
 {
   return (a < b) ? a : b;
+}
+
+static inline uint32_t next_pow2(uint32_t i) {
+  uint32_t r = 1;
+  while (r < i)
+  {
+    r <<= 1;
+  }
+  return r;
 }
 
 static inline void nap(int ms)
@@ -63,7 +70,7 @@ static inline void wait_for_return(char *msg)
 {
   char *lineptr = NULL;
   size_t linelen = 0;
-  printf(msg);
+  printf("%s", msg);
   getline(&lineptr, &linelen, stdin);
 }
 
