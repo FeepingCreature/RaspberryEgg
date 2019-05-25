@@ -15,6 +15,8 @@
 
 // base factor for pwm to ensure steppers don't get too much current
 #define BASE_PWM_FACTOR 0.55
+// "lock" factor for holding the pen when idling
+#define LOCK_PWM_FACTOR 0.9
 
 // egg rotation stepper in1/in2 (winding 1)
 #define STEPPER_EGG_PIN1 4

@@ -22,7 +22,7 @@
 struct pwm_config
 {
   int length_pow2;
-  float factor;
+  float factor, lock_factor;
 };
 
 struct stepper_config
@@ -86,9 +86,16 @@ static bool worker_aborted = false;
 static int servolog;
 #endif
 
+// round `value` to closest fraction to `fraction`
+// ie. round_frac(&i, 0.25) means i gets rounded to 0, 0.25, 0.5, 0.75, 1 etc.
+static void round_frac(float* value, float fraction)
+{
+  *value = floorf((*value / fraction) + 0.5) * fraction;
+}
+
 static uint64_t global_cycle_counter = 0;
 
-static void step(struct eggbot_config *config, coordinate from, coordinate to, float dt)
+static void step(struct eggbot_config *config, coordinate from, coordinate to, float dt, bool lock)
 {
   if (dt < 0)
   {
@@ -118,6 +125,16 @@ static void step(struct eggbot_config *config, coordinate from, coordinate to, f
 
   volatile uint32_t *set_reg = gpio_port + (GPIO_SET_OFFSET / sizeof(uint32_t));
   volatile uint32_t *clr_reg = gpio_port + (GPIO_CLR_OFFSET / sizeof(uint32_t));
+  float pwm_factor = lock ? config->pwm_config.lock_factor : config->pwm_config.factor;
+
+  if (lock)
+  {
+    // lock to 90° substeps (more motor force)
+    round_frac(&from.egg.substep, 0.25);
+    round_frac(&from.pen.substep, 0.25);
+    round_frac(&to.egg.substep, 0.25);
+    round_frac(&to.egg.substep, 0.25);
+  }
 
   const float TWOPI = M_PI * 2.0;
 
@@ -167,11 +184,11 @@ static void step(struct eggbot_config *config, coordinate from, coordinate to, f
     struct stepper_config pen_config = config->pen_config;
     struct servo_config servo_config = config->servo_config;
 
-    int pwm_limit_egg_winding1 = (int) (pwm_config.factor * fabsf(egg_winding1) * pwm_config.length_pow2);
-    int pwm_limit_egg_winding2 = (int) (pwm_config.factor * fabsf(egg_winding2) * pwm_config.length_pow2);
+    int pwm_limit_egg_winding1 = (int) (pwm_factor * fabsf(egg_winding1) * pwm_config.length_pow2);
+    int pwm_limit_egg_winding2 = (int) (pwm_factor * fabsf(egg_winding2) * pwm_config.length_pow2);
 
-    int pwm_limit_pen_winding1 = (int) (pwm_config.factor * fabsf(pen_winding1) * pwm_config.length_pow2);
-    int pwm_limit_pen_winding2 = (int) (pwm_config.factor * fabsf(pen_winding2) * pwm_config.length_pow2);
+    int pwm_limit_pen_winding1 = (int) (pwm_factor * fabsf(pen_winding1) * pwm_config.length_pow2);
+    int pwm_limit_pen_winding2 = (int) (pwm_factor * fabsf(pen_winding2) * pwm_config.length_pow2);
 
     uint32_t bits_egg_winding1 = (egg_out1 << egg_config.out1) | (egg_out2 << egg_config.out2);
     uint32_t bits_egg_winding2 = (egg_out3 << egg_config.out3) | (egg_out4 << egg_config.out4);
@@ -324,7 +341,7 @@ static void *worker_task(void *data)
 
       if (task.quit) break;
 
-      step(&worker->config, task.from, task.to, task.dt);
+      step(&worker->config, task.from, task.to, task.dt, false);
       last = task.to;
     }
     else
@@ -333,7 +350,7 @@ static void *worker_task(void *data)
       while (!ringbuffer_peek(worker->queue) && !worker_abort)
       {
         coordinate next = last;
-        step(&worker->config, last, next, 0.1f);
+        step(&worker->config, last, next, 0.1f, true);
       }
     }
   }
@@ -472,7 +489,7 @@ int main(int argc, const char **argv)
   coordinate calibrateTo = {{ 0 }};
   double start = secs();
   printf("calibrate stepper loop...\n");
-  step(&calibrate_config, calibrateFrom, calibrateTo, 1.0);
+  step(&calibrate_config, calibrateFrom, calibrateTo, 1.0, false);
   double end = secs();
   printf("calibrate stepper loop OK\n");
   printf("%f seconds for %i stepper control cycles\n", end - start, CALIBRATION_CYCLES);
@@ -489,6 +506,7 @@ int main(int argc, const char **argv)
     .pwm_config = {
       .length_pow2 = cycles_per_pwm,
       .factor = BASE_PWM_FACTOR,
+      .lock_factor = LOCK_PWM_FACTOR,
       // .boost = 16, // TODO per-coil pwm
     },
     .egg_config = egg_config,
