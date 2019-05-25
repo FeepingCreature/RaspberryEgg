@@ -1,9 +1,9 @@
 #ifndef RASPBERRYEGG_RINGBUFFER_H
 #define RASPBERRYEGG_RINGBUFFER_H
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdlib.h>
-#include <stdatomic.h>
 
 #include "util.h"
 

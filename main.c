@@ -522,7 +522,8 @@ int main(int argc, const char **argv)
     printf("printing...\n");
     process_eggcode_file(&worker_thread, &coord, argv[i]);
     printf("printing OK\n");
-    printf("homing.\n");
+    // better use eggbot exporter "always home" feature for this.
+    /*printf("homing.\n");
     {
       // approx distance
       float dist = fabsf(unitf(coord.egg)) + fabsf(unitf(coord.pen));
@@ -531,7 +532,7 @@ int main(int argc, const char **argv)
       set_instant_speed(&coord, origin, dt);
       queue_task(worker_thread.queue, coord, origin, dt);
       coord = origin;
-    }
+    }*/
   }
 
   queue_quit(worker_thread.queue);
